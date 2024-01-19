@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Convenience functions and code used by ee/__init__.py.
 
 These functions are in general re-exported from the "ee" module and should be
@@ -11,7 +10,7 @@ referenced from there (e.g. "ee.profilePrinting").
 import contextlib
 import json
 import sys
-from typing import Any, Dict, Iterator, Optional, TextIO, Union
+from typing import Any, Callable, Dict, Iterator, Optional, TextIO, Union
 
 from google.auth import crypt
 from google.oauth2 import service_account

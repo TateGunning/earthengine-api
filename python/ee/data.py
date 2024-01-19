@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Singleton for the library's communication with the Earth Engine API."""
 
 # Using lowercase function naming to match the JavaScript names.
@@ -13,6 +12,7 @@ import threading
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Union
 import uuid
 
+import google.auth
 # Rename to avoid redefined-outer-name warning.
 from google.oauth2 import credentials as credentials_lib
 import google_auth_httplib2
@@ -21,6 +21,7 @@ import httplib2
 import requests
 
 from ee import _cloud_api_utils
+from ee import _utils
 from ee import computedobject
 from ee import deprecation
 from ee import ee_exception
@@ -231,31 +232,51 @@ def initialize(
   _initialized = True
 
 
+def is_initialized() -> bool:
+  return _initialized
+
+
 def get_persistent_credentials() -> credentials_lib.Credentials:
-  """Read persistent credentials from ~/.config/earthengine.
+  """Read persistent credentials from ~/.config/earthengine or ADC.
 
   Raises EEException with helpful explanation if credentials don't exist.
 
   Returns:
-    OAuth2Credentials built from persistently stored refresh_token
+    OAuth2Credentials built from persistently stored refresh_token, containing
+    the client project in the quota_project_id field, if available.
   """
+  credentials = None
+  args = {}
   try:
-    return credentials_lib.Credentials(
-        None, **oauth.get_credentials_arguments()
-    )
+    args = oauth.get_credentials_arguments()
   except IOError:
-    raise ee_exception.EEException(  # pylint: disable=raise-missing-from
-        'Please authorize access to your Earth Engine account by '
-        'running\n\nearthengine authenticate\n\n'
-        'in your command line, and then retry.'
-    )
+    pass
+  if args.get('refresh_token'):
+    credentials = credentials_lib.Credentials(None, **args)
+  else:
+    # If EE credentials aren't available, try application default credentials.
+    try:
+      credentials, unused_project_id = google.auth.default()
+    except google.auth.exceptions.DefaultCredentialsError:
+      pass
+  if credentials:
+    # earthengine set_project always overrides gcloud set-quota-project
+    project = args.get('quota_project_id') or oauth.get_appdefault_project()
+    if project and project != credentials.quota_project_id:
+      credentials = credentials.with_quota_project(project)
+    return credentials
+  raise ee_exception.EEException(  # pylint: disable=raise-missing-from
+      'Please authorize access to your Earth Engine account by '
+      'running\n\nearthengine authenticate\n\n'
+      'in your command line, or ee.Authenticate() in Python, and then retry.'
+  )
 
 
 def reset() -> None:
   """Resets the data module, clearing credentials and custom base URLs."""
   global _api_base_url, _tile_base_url, _credentials, _initialized
   global _requests_session, _cloud_api_resource, _cloud_api_resource_raw
-  global _cloud_api_base_url
+  global _cloud_api_base_url, _cloud_api_user_project
   global _cloud_api_key, _http_transport
   _credentials = None
   _api_base_url = None
@@ -267,6 +288,8 @@ def reset() -> None:
   _cloud_api_key = None
   _cloud_api_resource = None
   _cloud_api_resource_raw = None
+  _cloud_api_user_project = None
+  _cloud_api_utils.set_cloud_api_user_project(DEFAULT_CLOUD_API_USER_PROJECT)
   _http_transport = None
   _initialized = False
 
@@ -1437,10 +1460,11 @@ def getAlgorithms() -> Any:
   return _cloud_api_utils.convert_algorithms(_execute_cloud_call(call))
 
 
+@_utils.accept_opt_prefix('opt_path', 'opt_force', 'opt_properties')
 def createAsset(
     value: Dict[str, Any],
-    opt_path: Optional[str] = None,
-    opt_properties: Optional[Dict[str, Any]] = None,
+    path: Optional[str] = None,
+    properties: Optional[Dict[str, Any]] = None,
 ) -> Any:
   """Creates an asset from a JSON value.
 
@@ -1450,8 +1474,8 @@ def createAsset(
 
   Args:
     value: An object describing the asset to create.
-    opt_path: An optional desired ID, including full path.
-    opt_properties: The keys and values of the properties to set on the created
+    path: An optional desired ID, including full path.
+    properties: The keys and values of the properties to set on the created
       asset.
 
   Returns:
@@ -1461,12 +1485,13 @@ def createAsset(
     raise ee_exception.EEException('Asset cannot be specified as string.')
   asset = value.copy()
   if 'name' not in asset:
-    if not opt_path:
+    if not path:
       raise ee_exception.EEException(
-          'Either asset name or opt_path must be specified.')
-    asset['name'] = _cloud_api_utils.convert_asset_id_to_asset_name(opt_path)
-  if 'properties' not in asset and opt_properties:
-    asset['properties'] = opt_properties
+          'Either asset name or path must be specified.'
+      )
+    asset['name'] = _cloud_api_utils.convert_asset_id_to_asset_name(path)
+  if 'properties' not in asset and properties:
+    asset['properties'] = properties
   # Make sure title and description are loaded in as properties.
   move_to_properties = ['title', 'description']
   for prop in move_to_properties:
@@ -1767,6 +1792,33 @@ def exportMap(request_id: str, params: Dict[str, Any]) -> Any:
   params = params.copy()
   return _prepare_and_run_export(
       request_id, params, _get_cloud_projects().map().export
+  )
+
+
+def exportClassifier(request_id: str, params: Dict[str, Any]) -> Any:
+  """Starts a classifier export task.
+
+  This is a low-level method. The higher-level ee.batch.Export.classifier
+  object is generally preferred for initiating classifier exports.
+
+  Args:
+    request_id (string): A unique ID for the task, from newTaskId. If you are
+      using the cloud API, this does not need to be from newTaskId, (though
+      that's a good idea, as it's a good source of unique strings). It can also
+      be empty, but in that case the request is more likely to fail as it cannot
+      be safely retried.
+    params: The object that describes the export task. If you are using the
+      cloud API, this should be an ExportClassifierRequest. However, the
+      "expression" parameter can be the actual Classifier to be exported, not
+      its serialized form.
+
+  Returns:
+    A dict with information about the created task.
+    If you are using the cloud API, this will be an Operation.
+  """
+  params = params.copy()
+  return _prepare_and_run_export(
+      request_id, params, _get_cloud_projects().classifier().export
   )
 
 
@@ -2255,16 +2307,17 @@ def setDefaultWorkloadTag(tag: Optional[Union[int, str]]) -> None:
   _workloadTag.set(tag)
 
 
-def resetWorkloadTag(opt_resetDefault: bool = False) -> None:
+@_utils.accept_opt_prefix('opt_resetDefault')
+def resetWorkloadTag(resetDefault: bool = False) -> None:
   """Sets the default tag for which to reset back to.
 
-  If opt_resetDefault parameter is set to true, the default will be set to empty
+  If resetDefault parameter is set to true, the default will be set to empty
   before resetting. Defaults to False.
 
   Args:
-    opt_resetDefault: Whether to reset the default back to empty.
+    resetDefault: Whether to reset the default back to empty.
   """
-  if opt_resetDefault:
+  if resetDefault:
     _workloadTag.setDefault('')
   _workloadTag.reset()
 

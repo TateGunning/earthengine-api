@@ -1,7 +1,6 @@
-#!/usr/bin/env python3
 """The EE Python library."""
 
-__version__ = '0.1.379'
+__version__ = '0.1.386'
 
 # Using lowercase function naming to match the JavaScript names.
 # pylint: disable=g-bad-name
@@ -10,8 +9,9 @@ import collections
 import datetime
 import inspect
 import os
-from typing import Any, Hashable, List as ListType, Optional, Sequence, Type, Union
+from typing import Any, Hashable, List as ListType, Optional, Sequence, Tuple, Type, Union
 
+from ee import _utils
 from ee import batch
 from ee import data
 from ee import deserializer
@@ -24,6 +24,7 @@ from ._helpers import call
 from ._helpers import profilePrinting
 from ._helpers import ServiceAccountCredentials
 from .apifunction import ApiFunction
+from .blob import Blob
 from .collection import Collection
 from .computedobject import ComputedObject
 from .customfunction import CustomFunction
@@ -35,6 +36,7 @@ from .ee_number import Number
 from .ee_string import String
 from .element import Element
 from .encodable import Encodable
+from .errormargin import ErrorMargin
 from .feature import Feature
 from .featurecollection import FeatureCollection
 from .filter import Filter
@@ -42,6 +44,8 @@ from .function import Function
 from .geometry import Geometry
 from .image import Image
 from .imagecollection import ImageCollection
+from .join import Join
+from .pixeltype import PixelType
 from .serializer import Serializer
 from .terrain import Terrain
 
@@ -75,39 +79,43 @@ Algorithms = _AlgorithmsContainer()
 
 def Authenticate(
     authorization_code: Optional[str] = None,
-    quiet: bool = False,
+    quiet: Optional[bool] = None,
     code_verifier: Optional[str] = None,
     auth_mode: Optional[str] = None,
     scopes: Optional[Sequence[str]] = None,
-) -> None:
+    force: bool = False,
+) -> Optional[bool]:
   """Prompts the user to authorize access to Earth Engine via OAuth2.
 
   Args:
     authorization_code: An optional authorization code.
     quiet: If true, do not require interactive prompts and force --no-browser
-      mode for gcloud.
+      mode for gcloud-legacy. If false, never supply --no-browser. Default is
+      None, which autodetects the --no-browser setting.
     code_verifier: PKCE verifier to prevent auth code stealing.
     auth_mode: The authentication mode. One of:
+      "colab" - use the Colab authentication flow;
       "notebook" - send user to notebook authenticator page;
-      "gcloud" - use gcloud to obtain credentials (will set appdefault);
-      "appdefault" - read from existing $GOOGLE_APPLICATION_CREDENTIALS file;
+      "gcloud" - use gcloud to obtain credentials;
+      "gcloud-legacy" - use legacy gcloud flow to obtain credentials;
       "localhost" - runs auth flow in local browser only;
       None - a default mode is chosen based on your environment.
-     scopes: List of scopes to use for authentication. Defaults to [
-       'https://www.googleapis.com/auth/earthengine',
-       'https://www.googleapis.com/auth/devstorage.full_control' ].
+    scopes: List of scopes to use for authentication. Defaults to [
+        'https://www.googleapis.com/auth/earthengine',
+        'https://www.googleapis.com/auth/devstorage.full_control' ].
+    force: Will force authentication even if valid credentials already exist.
 
   Returns:
-     (auth_url, code_verifier) when called with quiet='init_only'
+    True if we found valid credentials and didn't run the auth flow.
   """
-  oauth.authenticate(
-      authorization_code, quiet, code_verifier, auth_mode, scopes
-  )
+  return oauth.authenticate(authorization_code, quiet, code_verifier, auth_mode,
+                            scopes, force)
 
 
+@_utils.accept_opt_prefix('opt_url')
 def Initialize(
     credentials: Optional[Any] = 'persistent',
-    opt_url: Optional[str] = None,
+    url: Optional[str] = None,
     cloud_api_key: Optional[str] = None,
     http_transport: Optional[Any] = None,
     project: Optional[Union[str, int]] = None,
@@ -121,39 +129,52 @@ def Initialize(
 
   Args:
     credentials: OAuth2 credentials.  'persistent' (default) means use
-        credentials already stored in the filesystem, or raise an explanatory
-        exception guiding the user to create those credentials.
-    opt_url: The base url for the EarthEngine REST API to connect to.
+      credentials already stored in the filesystem, or raise an explanatory
+      exception guiding the user to create those credentials.
+    url: The base url for the EarthEngine REST API to connect to.
     cloud_api_key: An optional API key to use the Cloud API.
     http_transport: The http transport method to use when making requests.
     project: The client project ID or number to use when making API calls.
   """
   if credentials == 'persistent':
     credentials = data.get_persistent_credentials()
+  if not project and credentials and hasattr(credentials, 'quota_project_id'):
+    project = credentials.quota_project_id
+  # SDK credentials are not authorized for EE so a project must be given.
+  if not project and oauth.is_sdk_credentials(credentials):
+    raise EEException(
+        'ee.Initialize: no project found. '
+        'Call with project= or see Earth Engine Authentication docs.'
+    )
 
   data.initialize(
       credentials=credentials,
-      api_base_url=(opt_url + '/api' if opt_url else None),
-      tile_base_url=opt_url,
-      cloud_api_base_url=opt_url,
+      api_base_url=(url + '/api' if url else None),
+      tile_base_url=url,
+      cloud_api_base_url=url,
       cloud_api_key=cloud_api_key,
       project=project,
-      http_transport=http_transport)
+      http_transport=http_transport,
+  )
 
   # Initialize the dynamically loaded functions on the objects that want them.
   ApiFunction.initialize()
+  Blob.initialize()
   Collection.initialize()
   Date.initialize()
   Dictionary.initialize()
   Element.initialize()
+  ErrorMargin.initialize()
   Feature.initialize()
   FeatureCollection.initialize()
   Filter.initialize()
   Geometry.initialize()
   Image.initialize()
   ImageCollection.initialize()
+  Join.initialize()
   List.initialize()
   Number.initialize()
+  PixelType.initialize()
   String.initialize()
   Terrain.initialize()
 
@@ -170,16 +191,20 @@ def Reset() -> None:
   ApiFunction.reset()
   Element.reset()  # Must be before Collection.
   Collection.reset()  # Must be before FeatureCollection and ImageCollection.
+  Blob.reset()
   Date.reset()
   Dictionary.reset()
+  ErrorMargin.reset()
   Feature.reset()
   FeatureCollection.reset()
   Filter.reset()
   Geometry.reset()
   Image.reset()
   ImageCollection.reset()
+  Join.reset()
   List.reset()
   Number.reset()
+  PixelType.reset()
   String.reset()
   Terrain.reset()
 
@@ -366,13 +391,14 @@ def _InitializeGeneratedClasses() -> None:
 def _MakeClass(name: str) -> Type[Any]:
   """Generates a dynamic API class for a given name."""
 
-  def init(self, *args):
+  def init(self, *args, **kwargs):
     """Initializer for dynamically created classes.
 
     Args:
       self: The instance of this class.  Listed to make the linter hush.
       *args: Either a ComputedObject to be promoted to this type, or
              arguments to an algorithm with the same name as this class.
+      **kwargs: Any kwargs passed to this class constructor.
 
     Returns:
       The new class.
@@ -380,13 +406,11 @@ def _MakeClass(name: str) -> Type[Any]:
     a_class = globals()[name]
     onlyOneArg = (len(args) == 1)
     # Are we trying to cast something that's already of the right class?
-    if onlyOneArg and isinstance(args[0], a_class):
-      pass
-    else:
+    if not (onlyOneArg and isinstance(args[0], a_class)):
       # Decide whether to call a server-side constructor or just do a
       # client-side cast.
       ctor = ApiFunction.lookupInternal(name)
-      firstArgIsPrimitive = not isinstance(args[0], ComputedObject)
+      firstArgIsPrimitive = not isinstance((args or [None])[0], ComputedObject)
       shouldUseConstructor = False
       if ctor:
         if not onlyOneArg:
@@ -400,10 +424,10 @@ def _MakeClass(name: str) -> Type[Any]:
           shouldUseConstructor = True
 
       # Apply our decision.
-      if shouldUseConstructor:
+      if shouldUseConstructor and ctor:
         # Call ctor manually to avoid having promote() called on the output.
-        ComputedObject.__init__(
-            self, ctor, ctor.promoteArgs(ctor.nameArgs(args)))
+        promoted_args = ctor.promoteArgs(ctor.nameArgs(args, kwargs))
+        ComputedObject.__init__(self, ctor, promoted_args)
       else:
         # Just cast and hope for the best.
         if not onlyOneArg:

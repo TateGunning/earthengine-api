@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Representation of an Earth Engine FeatureCollection."""
 
 # Using lowercase function naming to match the JavaScript names.
@@ -8,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Type, Union
 
+from ee import _utils
 from ee import apifunction
 from ee import collection
 from ee import computedobject
@@ -28,6 +28,7 @@ class FeatureCollection(collection.Collection):
   # Tell pytype to not complain about dynamic attributes.
   _HAS_DYNAMIC_ATTRIBUTES = True
 
+  @_utils.accept_opt_prefix('opt_column')
   def __init__(
       self,
       args: Optional[
@@ -40,20 +41,17 @@ class FeatureCollection(collection.Collection):
               computedobject.ComputedObject,
           ]
       ],
-      opt_column: Optional[Any] = None,
+      column: Optional[Any] = None,
   ):
     """Constructs a collection features.
 
     Args:
-      args: constructor argument.  One of:
-          1) A string - assumed to be the name of a collection.
-          2) A geometry.
-          3) A feature.
-          4) An array of features.
-          5) A GeoJSON FeatureCollection.
-          6) A computed object - reinterpreted as a collection.
-      opt_column: The name of the geometry column to use. Only useful with the
-          string constructor.
+      args: constructor argument.  One of: 1) A string - assumed to be the name
+        of a collection. 2) A geometry. 3) A feature. 4) An array of features.
+        5) A GeoJSON FeatureCollection. 6) A computed object - reinterpreted as
+        a collection.
+      column: The name of the geometry column to use. Only useful with the
+        string constructor.
 
     Raises:
       EEException: if passed something other than the above.
@@ -71,8 +69,8 @@ class FeatureCollection(collection.Collection):
     if ee_types.isString(args):
       # An ID.
       actual_args = {'tableId': args}
-      if opt_column:
-        actual_args['geometryColumn'] = opt_column
+      if column:
+        actual_args['geometryColumn'] = column
       super().__init__(
           apifunction.ApiFunction.lookup('Collection.loadTable'), actual_args)
     elif isinstance(args, (list, tuple)):
@@ -87,7 +85,7 @@ class FeatureCollection(collection.Collection):
           apifunction.ApiFunction.lookup('Collection'), {
               'features': args
           })
-    elif isinstance(args, dict) and args.get('type') == 'FeatureCollection':
+    elif isinstance(args, dict) and args.get('type') == self.name():
       # A GeoJSON FeatureCollection
       super().__init__(
           apifunction.ApiFunction.lookup('Collection'),
@@ -105,8 +103,7 @@ class FeatureCollection(collection.Collection):
     """Imports API functions to this class."""
     if not cls._initialized:
       super().initialize()
-      apifunction.ApiFunction.importApi(
-          cls, 'FeatureCollection', 'FeatureCollection')
+      apifunction.ApiFunction.importApi(cls, cls.name(), cls.name())
       cls._initialized = True
 
   @classmethod

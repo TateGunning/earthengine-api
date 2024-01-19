@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """An interface to the Earth Engine batch processing system.
 
 Use the static methods on the Export class to create export tasks, call start()
@@ -29,6 +28,7 @@ class Task:
     EXPORT_MAP = 'EXPORT_TILES'
     EXPORT_TABLE = 'EXPORT_FEATURES'
     EXPORT_VIDEO = 'EXPORT_VIDEO'
+    EXPORT_CLASSIFIER = 'EXPORT_CLASSIFIER'
 
   class State(str, enum.Enum):
     """The state of a Task."""
@@ -129,6 +129,8 @@ class Task:
       result = data.exportTable(self._request_id, self.config)
     elif self.task_type == Task.Type.EXPORT_VIDEO:
       result = data.exportVideo(self._request_id, self.config)
+    elif self.task_type == Task.Type.EXPORT_CLASSIFIER:
+      result = data.exportClassifier(self._request_id, self.config)
     else:
       raise ee_exception.EEException(
           'Unknown Task type "{}"'.format(self.task_type))
@@ -246,7 +248,7 @@ class Export:
               single positive integer as the maximum dimension or
               "WIDTHxHEIGHT" where WIDTH and HEIGHT are each positive integers.
             - skipEmptyTiles: If true, skip writing empty (i.e. fully-masked)
-              image tiles. Defaults to false.
+              image tiles. Defaults to false. Only supported on GeoTIFF exports.
             If exporting to Google Drive (default):
             - driveFolder: The Google Drive Folder that the export will reside
               in. Note: (a) if the folder name exists at any level, the output
@@ -357,43 +359,41 @@ class Export:
         description: Human-readable name of the task.
         bucket: The name of a Cloud Storage bucket for the export.
         fileNamePrefix: Cloud Storage object name prefix for the export.
-            Defaults to the name of the task.
-        dimensions: The dimensions of the exported image. Takes either a
-            single positive integer as the maximum dimension or "WIDTHxHEIGHT"
-            where WIDTH and HEIGHT are each positive integers.
-        region: The lon,lat coordinates for a LinearRing or Polygon
-            specifying the region to export. Can be specified as a nested
-            lists of numbers or a serialized string. Defaults to the image's
-            region.
-        scale: The resolution in meters per pixel. Defaults to the
-            native resolution of the image asset unless a crsTransform
-            is specified.
-        crs: The coordinate reference system of the exported image's
-            projection. Defaults to the image's default projection.
-        crsTransform: A comma-separated string of 6 numbers describing
-            the affine transform of the coordinate reference system of the
-            exported image's projection, in the order: xScale, xShearing,
-            xTranslation, yShearing, yScale and yTranslation. Defaults to
-            the image's native CRS transform.
-        maxPixels: The maximum allowed number of pixels in the exported
-            image. The task will fail if the exported region covers more
-            pixels in the specified projection. Defaults to 100,000,000.
+          Defaults to the name of the task.
+        dimensions: The dimensions of the exported image. Takes either a single
+          positive integer as the maximum dimension or "WIDTHxHEIGHT" where
+          WIDTH and HEIGHT are each positive integers.
+        region: The lon,lat coordinates for a LinearRing or Polygon specifying
+          the region to export. Can be specified as a nested lists of numbers or
+          a serialized string. Defaults to the image's region.
+        scale: The resolution in meters per pixel. Defaults to the native
+          resolution of the image asset unless a crsTransform is specified.
+        crs: The coordinate reference system of the exported image's projection.
+          Defaults to the image's default projection.
+        crsTransform: A comma-separated string of 6 numbers describing the
+          affine transform of the coordinate reference system of the exported
+          image's projection, in the order: xScale, xShearing, xTranslation,
+          yShearing, yScale and yTranslation. Defaults to the image's native CRS
+          transform.
+        maxPixels: The maximum allowed number of pixels in the exported image.
+          The task will fail if the exported region covers more pixels in the
+          specified projection. Defaults to 100,000,000.
         shardSize: Size in pixels of the tiles in which this image will be
-            computed. Defaults to 256.
+          computed. Defaults to 256.
         fileDimensions: The dimensions in pixels of each image file, if the
-            image is too large to fit in a single file. May specify a
-            single number to indicate a square shape, or a tuple of two
-            dimensions to indicate (width,height). Note that the image will
-            still be clipped to the overall image dimensions. Must be a
-            multiple of shardSize.
-        skipEmptyTiles: If true, skip writing empty (i.e. fully-masked)
-            image tiles. Defaults to false.
+          image is too large to fit in a single file. May specify a single
+          number to indicate a square shape, or a tuple of two dimensions to
+          indicate (width,height). Note that the image will still be clipped to
+          the overall image dimensions. Must be a multiple of shardSize.
+        skipEmptyTiles: If true, skip writing empty (i.e. fully-masked) image
+          tiles. Defaults to false. Only supported on GeoTIFF exports.
         fileFormat: The string file format to which the image is exported.
-            Currently only 'GeoTIFF' and 'TFRecord' are supported, defaults to
-            'GeoTIFF'.
-        formatOptions: A dictionary of string keys to format specific options.
+          Currently only 'GeoTIFF' and 'TFRecord' are supported, defaults to
+          'GeoTIFF'.
+        formatOptions: A dictionary of string keys to format-specific options.
+          For 'GeoTIFF': 'cloudOptimized' (bool), 'noData' (float).
         **kwargs: Holds other keyword arguments that may have been deprecated
-            such as 'crs_transform'.
+          such as 'crs_transform'.
 
       Returns:
         An unstarted Task that exports the image to Google Cloud Storage.
@@ -425,46 +425,44 @@ class Export:
       Args:
         image: The image to be exported.
         description: Human-readable name of the task.
-        folder: The name of a unique folder in your Drive account to
-            export into. Defaults to the root of the drive.
-        fileNamePrefix: The Google Drive filename for the export.
-            Defaults to the name of the task.
-        dimensions: The dimensions of the exported image. Takes either a
-            single positive integer as the maximum dimension or "WIDTHxHEIGHT"
-            where WIDTH and HEIGHT are each positive integers.
-        region: The lon,lat coordinates for a LinearRing or Polygon
-            specifying the region to export. Can be specified as a nested
-            lists of numbers or a serialized string. Defaults to the image's
-            region.
-        scale: The resolution in meters per pixel. Defaults to the
-            native resolution of the image asset unless a crsTransform
-            is specified.
-        crs: The coordinate reference system of the exported image's
-            projection. Defaults to the image's default projection.
-        crsTransform: A comma-separated string of 6 numbers describing
-            the affine transform of the coordinate reference system of the
-            exported image's projection, in the order: xScale, xShearing,
-            xTranslation, yShearing, yScale and yTranslation. Defaults to
-            the image's native CRS transform.
-        maxPixels: The maximum allowed number of pixels in the exported
-            image. The task will fail if the exported region covers more
-            pixels in the specified projection. Defaults to 100,000,000.
+        folder: The name of a unique folder in your Drive account to export
+          into. Defaults to the root of the drive.
+        fileNamePrefix: The Google Drive filename for the export. Defaults to
+          the name of the task.
+        dimensions: The dimensions of the exported image. Takes either a single
+          positive integer as the maximum dimension or "WIDTHxHEIGHT" where
+          WIDTH and HEIGHT are each positive integers.
+        region: The lon,lat coordinates for a LinearRing or Polygon specifying
+          the region to export. Can be specified as a nested lists of numbers or
+          a serialized string. Defaults to the image's region.
+        scale: The resolution in meters per pixel. Defaults to the native
+          resolution of the image asset unless a crsTransform is specified.
+        crs: The coordinate reference system of the exported image's projection.
+          Defaults to the image's default projection.
+        crsTransform: A comma-separated string of 6 numbers describing the
+          affine transform of the coordinate reference system of the exported
+          image's projection, in the order: xScale, xShearing, xTranslation,
+          yShearing, yScale and yTranslation. Defaults to the image's native CRS
+          transform.
+        maxPixels: The maximum allowed number of pixels in the exported image.
+          The task will fail if the exported region covers more pixels in the
+          specified projection. Defaults to 100,000,000.
         shardSize: Size in pixels of the tiles in which this image will be
-            computed. Defaults to 256.
+          computed. Defaults to 256.
         fileDimensions: The dimensions in pixels of each image file, if the
-            image is too large to fit in a single file. May specify a
-            single number to indicate a square shape, or a tuple of two
-            dimensions to indicate (width,height). Note that the image will
-            still be clipped to the overall image dimensions. Must be a
-            multiple of shardSize.
-        skipEmptyTiles: If true, skip writing empty (i.e. fully-masked)
-            image tiles. Defaults to false.
+          image is too large to fit in a single file. May specify a single
+          number to indicate a square shape, or a tuple of two dimensions to
+          indicate (width,height). Note that the image will still be clipped to
+          the overall image dimensions. Must be a multiple of shardSize.
+        skipEmptyTiles: If true, skip writing empty (i.e. fully-masked) image
+          tiles. Defaults to false. Only supported on GeoTIFF exports.
         fileFormat: The string file format to which the image is exported.
-            Currently only 'GeoTIFF' and 'TFRecord' are supported, defaults to
-            'GeoTIFF'.
-        formatOptions: A dictionary of string keys to format specific options.
+          Currently only 'GeoTIFF' and 'TFRecord' are supported, defaults to
+          'GeoTIFF'.
+        formatOptions: A dictionary of string keys to format-specific options.
+          For 'GeoTIFF': 'cloudOptimized' (bool), 'noData' (float).
         **kwargs: Holds other keyword arguments that may have been deprecated
-            such as 'crs_transform', 'driveFolder', and 'driveFileNamePrefix'.
+          such as 'crs_transform', 'driveFolder', and 'driveFileNamePrefix'.
 
       Returns:
         An unstarted Task that exports the image to Drive.
@@ -959,6 +957,55 @@ class Export:
                                             Task.ExportDestination.DRIVE)
       return _create_export_task(config, Task.Type.EXPORT_VIDEO)
 
+  class classifier:
+    """A class with static methods to start classifier export tasks."""
+
+    def __init__(self):
+      """Forbids class instantiation."""
+      raise AssertionError('This class cannot be instantiated.')
+
+    def __new__(cls,
+                classifier,
+                description='myExportClassifierTask',
+                config=None):
+      """Export an EE Classifier.
+
+      Args:
+        classifier: The feature collection to be exported.
+        description: Human-readable name of the task.
+        config: A dictionary that will be copied and used as parameters
+            for the task:
+            - assetId: The destination asset ID.
+      Returns:
+        An unstarted Task that exports the table.
+      """
+      config = (config or {}).copy()
+      return Export.classifier.toAsset(classifier, description, **config)
+
+    # Disable argument usage check; arguments are accessed using locals().
+    # pylint: disable=unused-argument
+    @staticmethod
+    def toAsset(classifier,
+                description='myExportClassifierTask',
+                assetId=None,
+                overwrite=False,
+                **kwargs):
+      """Creates a task to export an EE Image to an EE Asset.
+
+      Args:
+        classifier: The classifier to be exported.
+        description: Human-readable name of the task.
+        assetId: The destination asset ID.
+        overwrite: If an existing asset can be overwritten by this export.
+        **kwargs: Holds other keyword arguments.
+      Returns:
+        An unstarted Task that exports the image as an Earth Engine Asset.
+      """
+      config = _capture_parameters(locals(), ['classifier'])
+      config = _prepare_classifier_export_config(classifier, config,
+                                                 Task.ExportDestination.ASSET)
+      return _create_export_task(config, Task.Type.EXPORT_CLASSIFIER)
+
 # Mapping from file formats to prefixes attached to format specific config.
 FORMAT_PREFIX_MAP = {'GEOTIFF': 'tiff', 'TFRECORD': 'tfrecord'}
 
@@ -1047,8 +1094,11 @@ def _prepare_image_export_config(
   #   into the image's Expression.
   # - The request ID will be populated when the Task is created.
   # We've been deleting config parameters as we handle them. Anything left
-  # over is a problem.
+  # over is a problem. We can provide helpful error messages for some edge
+  # cases like params that only work for specific export types.
   if config:
+    if 'skipEmptyTiles' in config:
+      raise ValueError('skipEmptyTiles is only supported for GeoTIFF exports.')
     raise ee_exception.EEException(
         'Unknown configuration options: {}.'.format(config))
 

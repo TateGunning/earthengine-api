@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Earth Engine helper functions for working with the Cloud API.
 
 Many of the functions defined here are for mapping legacy calls in ee.data into
@@ -165,6 +164,9 @@ def build_cloud_resource(
   if http_transport is None:
     http_transport = _Http(session, timeout)
   if credentials is not None:
+    # Suppress the quota project, to avoid serviceUsage error from discovery.
+    if credentials.quota_project_id:
+      credentials = credentials.with_quota_project(None)
     http_transport = google_auth_httplib2.AuthorizedHttp(
         credentials, http=http_transport
     )

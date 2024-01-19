@@ -1,9 +1,9 @@
-#!/usr/bin/env python3
 """A wrapper for numbers."""
 
 from typing import Any, Optional, Union
 
 from ee import _cloud_api_utils
+from ee import _utils
 from ee import apifunction
 from ee import computedobject
 from ee import ee_exception
@@ -47,7 +47,7 @@ class Number(computedobject.ComputedObject):
   def initialize(cls) -> None:
     """Imports API functions to this class."""
     if not cls._initialized:
-      apifunction.ApiFunction.importApi(cls, 'Number', 'Number')
+      apifunction.ApiFunction.importApi(cls, cls.name(), cls.name())
       cls._initialized = True
 
   @classmethod
@@ -60,14 +60,16 @@ class Number(computedobject.ComputedObject):
   def name() -> str:
     return 'Number'
 
-  def encode(self, opt_encoder: Any = None) -> Any:
+  @_utils.accept_opt_prefix('opt_encoder')
+  def encode(self, encoder: Any = None) -> Any:
     if isinstance(self._number, (float, int)):
       return self._number
     else:
-      return super().encode(opt_encoder)
+      return super().encode(encoder)
 
-  def encode_cloud_value(self, opt_encoder: Any = None) -> Any:
+  @_utils.accept_opt_prefix('opt_encoder')
+  def encode_cloud_value(self, encoder: Any = None) -> Any:
     if isinstance(self._number, (float, int)):
       return _cloud_api_utils.encode_number_as_cloud_value(self._number)
     else:
-      return super().encode_cloud_value(opt_encoder)
+      return super().encode_cloud_value(encoder)

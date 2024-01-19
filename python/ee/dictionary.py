@@ -1,9 +1,9 @@
-#!/usr/bin/env python3
 """A wrapper for dictionaries."""
 
 
 from typing import Any, Dict, Optional, Sequence, Union
 
+from ee import _utils
 from ee import apifunction
 from ee import computedobject
 
@@ -39,20 +39,19 @@ class Dictionary(computedobject.ComputedObject):
       self._dictionary = arg
     else:
       self._dictionary = None
-      if (isinstance(arg, computedobject.ComputedObject)
-          and arg.func
-          and arg.func.getSignature()['returns'] == 'Dictionary'):
+      if self.is_func_returning_same(arg):
         # If it's a call that's already returning a Dictionary, just cast.
+        assert isinstance(arg, computedobject.ComputedObject)
         super().__init__(arg.func, arg.args, arg.varName)
       else:
         # Delegate everything else to the server-side constructor.
-        super().__init__(apifunction.ApiFunction('Dictionary'), {'input': arg})
+        super().__init__(apifunction.ApiFunction(self.name()), {'input': arg})
 
   @classmethod
   def initialize(cls) -> None:
     """Imports API functions to this class."""
     if not cls._initialized:
-      apifunction.ApiFunction.importApi(cls, 'Dictionary', 'Dictionary')
+      apifunction.ApiFunction.importApi(cls, cls.name(), cls.name())
       cls._initialized = True
 
   @classmethod
@@ -65,14 +64,16 @@ class Dictionary(computedobject.ComputedObject):
   def name() -> str:
     return 'Dictionary'
 
-  def encode(self, opt_encoder=None):
+  @_utils.accept_opt_prefix('opt_encoder')
+  def encode(self, encoder=None):
     if self._dictionary is not None:
-      return opt_encoder(self._dictionary)
+      return encoder(self._dictionary)
     else:
-      return super().encode(opt_encoder)
+      return super().encode(encoder)
 
-  def encode_cloud_value(self, opt_encoder=None):
+  @_utils.accept_opt_prefix('opt_encoder')
+  def encode_cloud_value(self, encoder=None):
     if self._dictionary is not None:
-      return {'valueReference': opt_encoder(self._dictionary)}
+      return {'valueReference': encoder(self._dictionary)}
     else:
-      return super().encode_cloud_value(opt_encoder)
+      return super().encode_cloud_value(encoder)
