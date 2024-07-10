@@ -4,3 +4,4 @@ google-auth>=1.4.1
 google-auth-httplib2>=0.0.3
 httplib2>=0.9.2,<1dev
 requests
+zipp>=3.19.1 # not directly required, pinned by Snyk to avoid a vulnerability
